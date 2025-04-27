@@ -1,2 +1,2 @@
-PyQt6==6.6.1
-biopython==1.83 
+PyQt5==5.15.9
+biopython==1.80
