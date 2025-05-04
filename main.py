@@ -95,7 +95,8 @@ class AnalysisWorker(QThread):
     
     def run(self):
         try:
-            
+#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>            
+            # Clean and validate the input sequence
             cleaned_sequence = clean_sequence(self.sequence)
             is_valid, invalid_chars = validate_sequence(cleaned_sequence)
             
@@ -107,44 +108,51 @@ class AnalysisWorker(QThread):
                 self.finished.emit({'error': error_msg})
                 return
             
-            
+            # Calculate basic sequence statistics
             self.progress.emit(10)
             length = len(cleaned_sequence)
             
-            
+            # Determine if sequence is DNA or RNA based on presence of U
             is_rna = 'U' in cleaned_sequence
             sequence_type = "RNA" if is_rna else "DNA"
             
+            # Calculate GC content (percentage of G and C nucleotides)
             self.progress.emit(20)
             gc_content = (cleaned_sequence.count('G') + cleaned_sequence.count('C')) / length * 100
             
+            # Calculate nucleotide frequencies and percentages
             self.progress.emit(30)
-            
             nucleotide_counts = Counter(cleaned_sequence)
             nucleotide_percentages = {nt: (count / length) * 100 for nt, count in nucleotide_counts.items()}
             
+            # Analyze codon frequencies (groups of 3 nucleotides)
             self.progress.emit(50)
-            
             codons = [cleaned_sequence[i:i+3] for i in range(0, len(cleaned_sequence) - 2, 3)]
             codon_counts = Counter(codons)
             
+            # Calculate AT and GC skew (measure of nucleotide bias)
             self.progress.emit(70)
-            
+            # AT skew = (A-T)/(A+T), measures bias between A and T
             at_skew = (cleaned_sequence.count('A') - cleaned_sequence.count('T')) / (cleaned_sequence.count('A') + cleaned_sequence.count('T') + 1e-6)
+            # GC skew = (G-C)/(G+C), measures bias between G and C
             gc_skew = (cleaned_sequence.count('G') - cleaned_sequence.count('C')) / (cleaned_sequence.count('G') + cleaned_sequence.count('C') + 1e-6)
             
+            # Count ambiguous nucleotides (N)
             self.progress.emit(90)
-            
             n_count = cleaned_sequence.count('N')
             
-            
+            # Create a version of sequence with N's removed
             filtered_sequence = ''.join(base for base in cleaned_sequence if base != 'N')
             
-            
+            # Generate sequence transformations
+            # Create complement (A->T, T->A, G->C, C->G, U->A for RNA)
             complement = cleaned_sequence.translate(str.maketrans('ATGCU', 'TACGA' if not is_rna else 'UACGA'))
+            # Create reverse complement (complement read backwards)
             reverse_complement = complement[::-1]
+            # Create RNA transcription (T->U for DNA sequences)
             transcription = cleaned_sequence.replace('T', 'U') if not is_rna else cleaned_sequence
             
+            # Compile all analysis results
             results = {
                 'length': length,
                 'gc_content': gc_content,
@@ -162,7 +170,7 @@ class AnalysisWorker(QThread):
                 'transcription': transcription,
                 'is_valid': True
             }
-            
+#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>              
             self.progress.emit(100)
             self.finished.emit(results)
             
