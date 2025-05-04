@@ -10,6 +10,60 @@ import sys
 import time
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QMimeData
+import re
+
+
+IUPAC_CODES = {
+    'A': 'Adenine',
+    'T': 'Thymine',
+    'C': 'Cytosine',
+    'G': 'Guanine',
+    'U': 'Uracil',
+    'N': 'Any nucleotide (A/C/G/T)',
+    'S': 'Strong bonds (G/C)',
+    'K': 'Keto (G/T)',
+    'Y': 'Pyrimidine (C/T)',
+    'W': 'Weak bonds (A/T)',
+    'R': 'Purine (A/G)',
+    'M': 'Amino (A/C)',
+    'B': 'Not A (C/G/T)',
+    'D': 'Not C (A/G/T)',
+    'H': 'Not G (A/C/T)',
+    'V': 'Not T (A/C/G)'
+}
+
+def clean_sequence(sequence: str) -> str:
+    """
+    Clean the input sequence by removing whitespace and converting to uppercase.
+    
+    Args:
+        sequence (str): The input sequence to clean
+        
+    Returns:
+        str: Cleaned sequence with no whitespace and all uppercase letters
+    """
+    return re.sub(r'\s+', '', sequence).upper()
+
+def validate_sequence(sequence: str) -> tuple[bool, list[tuple[str, int]]]:
+    """
+    Validate the sequence using IUPAC nucleotide codes.
+    
+    Args:
+        sequence (str): The sequence to validate
+        
+    Returns:
+        tuple[bool, list[tuple[str, int]]]: A tuple containing:
+            - Boolean indicating if sequence is valid
+            - List of tuples containing invalid characters and their positions
+    """
+    invalid_chars = []
+    valid_chars = set(IUPAC_CODES.keys())
+    
+    for i, char in enumerate(sequence):
+        if char not in valid_chars:
+            invalid_chars.append((char, i))
+    
+    return len(invalid_chars) == 0, invalid_chars
 
 class DarkTheme:
     @staticmethod
@@ -41,43 +95,55 @@ class AnalysisWorker(QThread):
     
     def run(self):
         try:
-            # Basic sequence analysis
-            self.progress.emit(10)
-            length = len(self.sequence)
             
-            # Detect if sequence is DNA or RNA
-            is_rna = 'U' in self.sequence
+            cleaned_sequence = clean_sequence(self.sequence)
+            is_valid, invalid_chars = validate_sequence(cleaned_sequence)
+            
+            if not is_valid:
+                error_msg = "Invalid sequence detected!\nThe following invalid characters were found:\n"
+                for char, pos in invalid_chars:
+                    error_msg += f"- Character '{char}' at position {pos}\n"
+                error_msg += "\nPlease use only valid IUPAC nucleotide codes."
+                self.finished.emit({'error': error_msg})
+                return
+            
+            
+            self.progress.emit(10)
+            length = len(cleaned_sequence)
+            
+            
+            is_rna = 'U' in cleaned_sequence
             sequence_type = "RNA" if is_rna else "DNA"
             
             self.progress.emit(20)
-            gc_content = (self.sequence.count('G') + self.sequence.count('C')) / length * 100
+            gc_content = (cleaned_sequence.count('G') + cleaned_sequence.count('C')) / length * 100
             
             self.progress.emit(30)
-            # Nucleotide frequencies
-            nucleotide_counts = Counter(self.sequence)
+            
+            nucleotide_counts = Counter(cleaned_sequence)
             nucleotide_percentages = {nt: (count / length) * 100 for nt, count in nucleotide_counts.items()}
             
             self.progress.emit(50)
-            # Codon frequencies
-            codons = [self.sequence[i:i+3] for i in range(0, len(self.sequence) - 2, 3)]
+            
+            codons = [cleaned_sequence[i:i+3] for i in range(0, len(cleaned_sequence) - 2, 3)]
             codon_counts = Counter(codons)
             
             self.progress.emit(70)
-            # AT/GC Skew
-            at_skew = (self.sequence.count('A') - self.sequence.count('T')) / (self.sequence.count('A') + self.sequence.count('T') + 1e-6)
-            gc_skew = (self.sequence.count('G') - self.sequence.count('C')) / (self.sequence.count('G') + self.sequence.count('C') + 1e-6)
+            
+            at_skew = (cleaned_sequence.count('A') - cleaned_sequence.count('T')) / (cleaned_sequence.count('A') + cleaned_sequence.count('T') + 1e-6)
+            gc_skew = (cleaned_sequence.count('G') - cleaned_sequence.count('C')) / (cleaned_sequence.count('G') + cleaned_sequence.count('C') + 1e-6)
             
             self.progress.emit(90)
-            # Count N's in sequence
-            n_count = self.sequence.count('N')
             
-            # Filter out N's from sequence
-            filtered_sequence = ''.join(base for base in self.sequence if base != 'N')
+            n_count = cleaned_sequence.count('N')
             
-            # Generate transformations
-            complement = self.sequence.translate(str.maketrans('ATGCU', 'TACGA' if not is_rna else 'UACGA'))
+            
+            filtered_sequence = ''.join(base for base in cleaned_sequence if base != 'N')
+            
+            
+            complement = cleaned_sequence.translate(str.maketrans('ATGCU', 'TACGA' if not is_rna else 'UACGA'))
             reverse_complement = complement[::-1]
-            transcription = self.sequence.replace('T', 'U') if not is_rna else self.sequence
+            transcription = cleaned_sequence.replace('T', 'U') if not is_rna else cleaned_sequence
             
             results = {
                 'length': length,
@@ -87,13 +153,14 @@ class AnalysisWorker(QThread):
                 'nucleotide_counts': nucleotide_counts,
                 'nucleotide_percentages': nucleotide_percentages,
                 'codon_counts': codon_counts,
-                'sequence': self.sequence,
+                'sequence': cleaned_sequence,
                 'filtered_sequence': filtered_sequence,
                 'n_count': n_count,
                 'sequence_type': sequence_type,
                 'complement': complement,
                 'reverse_complement': reverse_complement,
-                'transcription': transcription
+                'transcription': transcription,
+                'is_valid': True
             }
             
             self.progress.emit(100)
@@ -108,7 +175,7 @@ class ResultFrame(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet("""
             QFrame {
-                background-color: #2d2d2d;
+                background-color: 
                 border-radius: 5px;
                 padding: 15px;
                 margin: 5px;
@@ -116,11 +183,11 @@ class ResultFrame(QFrame):
         """)
         layout = QVBoxLayout()
         
-        # Title and copy button layout
+        
         title_layout = QHBoxLayout()
         title_label = QLabel(title)
         title_label.setStyleSheet("""
-            color: #42b0f5;
+            color: 
             font-weight: bold;
             font-size: 18px;
         """)
@@ -128,11 +195,11 @@ class ResultFrame(QFrame):
         title_layout.addWidget(title_label)
         
         if show_copy_button:
-            # Create a container for the copy button and feedback
+            
             copy_container = QWidget()
             copy_container.setStyleSheet("""
                 QWidget {
-                    background-color: #3d3d3d;
+                    background-color: 
                     border-radius: 15px;
                     padding: 2px;
                 }
@@ -142,7 +209,7 @@ class ResultFrame(QFrame):
             
             self.copy_feedback = QLabel("")
             self.copy_feedback.setStyleSheet("""
-                color: #4CAF50;
+                color: 
                 font-size: 16px;
                 font-weight: bold;
             """)
@@ -151,20 +218,20 @@ class ResultFrame(QFrame):
             copy_button = QPushButton("📋")
             copy_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #3d3d3d;
-                    color: #42b0f5;
+                    background-color: 
+                    color: 
                     border: none;
                     font-size: 24px;
                     padding: 4px;
                     border-radius: 13px;
                 }
                 QPushButton:hover {
-                    background-color: #4d4d4d;
-                    color: #3a9ee0;
+                    background-color: 
+                    color: 
                 }
                 QPushButton:pressed {
-                    background-color: #5d5d5d;
-                    color: #2a8ed0;
+                    background-color: 
+                    color: 
                 }
             """)
             copy_button.setFixedSize(40, 40)
@@ -218,37 +285,37 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.current_file = None
         self.sequence = None
         
-        # Main widget and layout
+        
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
         
-        # Create splitter for input and results
+        
         splitter = QSplitter(Qt.Vertical)
         
-        # Input section
+        
         input_frame = QFrame()
         input_frame.setStyleSheet("""
             QFrame {
-                background-color: #2d2d2d;
+                background-color: 
                 border-radius: 5px;
                 padding: 15px;
             }
         """)
         input_layout = QVBoxLayout()
         
-        # File input section
+        
         file_layout = QHBoxLayout()
         input_label = QLabel("Enter DNA Sequence:")
         input_label.setStyleSheet("""
-            color: #42b0f5;
+            color: 
             font-weight: bold;
             font-size: 18px;
         """)
         
         self.file_path_label = QLabel("No file selected")
         self.file_path_label.setStyleSheet("""
-            color: #888888;
+            color: 
             font-size: 14px;
         """)
         self.file_path_label.setWordWrap(True)
@@ -256,7 +323,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.browse_button = QPushButton("Browse FASTA File")
         self.browse_button.setStyleSheet("""
             QPushButton {
-                background-color: #42b0f5;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -266,11 +333,11 @@ class GeneticAnalyzerGUI(QMainWindow):
                 min-height: 40px
             }
             QPushButton:hover {
-                background-color: #3a9ee0;
+                background-color: 
             }
             QPushButton:disabled {
-                background-color: #2d2d3d;
-                color: #888888;
+                background-color: 
+                color: 
             }
         """)
         self.browse_button.clicked.connect(self.browse_file)
@@ -278,7 +345,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.reset_file_button = QPushButton("Reset File")
         self.reset_file_button.setStyleSheet("""
             QPushButton {
-                background-color: #ff4444;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -288,11 +355,11 @@ class GeneticAnalyzerGUI(QMainWindow):
                 min-height: 40px
             }
             QPushButton:hover {
-                background-color: #ff3333;
+                background-color: 
             }
             QPushButton:disabled {
-                background-color: #2d2d3d;
-                color: #888888;
+                background-color: 
+                color: 
             }
         """)
         self.reset_file_button.clicked.connect(self.reset_file)
@@ -307,19 +374,19 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.sequence_input.setPlaceholderText("Enter your DNA sequence here or load a FASTA file...")
         self.sequence_input.setStyleSheet("""
             QTextEdit {
-                background-color: #1e1e1e;
+                background-color: 
                 color: white;
-                border: 1px solid #3d3d3d;
+                border: 1px solid 
                 border-radius: 3px;
                 padding: 8px;
                 font-size: 16px;
             }
             QTextEdit:focus {
-                border: 1px solid #42b0f5;
+                border: 1px solid 
                 color: white;
             }
             QTextEdit:focus {
-                border: 1px solid #42b0f5;
+                border: 1px solid 
                 color: white;
             }
         """)
@@ -327,14 +394,14 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 2px solid #3d3d3d;
+                border: 2px solid 
                 border-radius: 10px;
                 text-align: center;
-                background-color: #1e1e1e;
+                background-color: 
                 min-height: 30px;
             }
             QProgressBar::chunk {
-                background-color: #42b0f5;
+                background-color: 
                 border-radius: 8px;
                 margin: 2px;
             }
@@ -344,7 +411,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.analyze_button = QPushButton("Analyze Sequence")
         self.analyze_button.setStyleSheet("""
             QPushButton {
-                background-color: #42b0f5;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -353,7 +420,7 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #3a9ee0;
+                background-color: 
             }
         """)
         self.analyze_button.clicked.connect(self.analyze_sequence)
@@ -364,13 +431,13 @@ class GeneticAnalyzerGUI(QMainWindow):
         input_layout.addWidget(self.analyze_button)
         input_frame.setLayout(input_layout)
         
-        # Results section
+        
         self.results_scroll = QScrollArea()
         self.results_scroll.setWidgetResizable(True)
         self.results_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
-                background-color: #1e1e1e;
+                background-color: 
             }
         """)
         
@@ -378,15 +445,15 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.results_layout = QVBoxLayout(self.results_widget)
         self.results_scroll.setWidget(self.results_widget)
         
-        # Add widgets to splitter
+        
         splitter.addWidget(input_frame)
         splitter.addWidget(self.results_scroll)
         splitter.setSizes([300, 600])
         
-        # Add splitter to main layout
+        
         layout.addWidget(splitter)
         
-        # Apply dark theme
+        
         DarkTheme.apply(QApplication.instance())
     
     def browse_file(self):
@@ -400,7 +467,7 @@ class GeneticAnalyzerGUI(QMainWindow):
             self.current_file = file_name
             self.file_path_label.setText(f"Selected: {file_name}")
             self.file_path_label.setStyleSheet("""
-                color: #42b0f5;
+                color: 
                 font-size: 14px;
             """)
             self.browse_button.setText("Change File")
@@ -410,9 +477,9 @@ class GeneticAnalyzerGUI(QMainWindow):
             self.sequence_input.setEnabled(False)
             self.sequence_input.setStyleSheet("""
                 QTextEdit {
-                    background-color: #1e1e1e;
-                    color: #888888;
-                    border: 1px solid #3d3d3d;
+                    background-color: 
+                    color: 
+                    border: 1px solid 
                     border-radius: 3px;
                     padding: 8px;
                     font-size: 16px;
@@ -423,7 +490,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.current_file = None
         self.file_path_label.setText("No file selected")
         self.file_path_label.setStyleSheet("""
-            color: #888888;
+            color: 
             font-size: 14px;
         """)
         self.browse_button.setText("Browse FASTA File")
@@ -433,31 +500,31 @@ class GeneticAnalyzerGUI(QMainWindow):
         self.sequence_input.setPlaceholderText("Enter your DNA sequence here or load a FASTA file...")
         self.sequence_input.setStyleSheet("""
             QTextEdit {
-                background-color: #1e1e1e;
+                background-color: 
                 color: white;
-                border: 1px solid #3d3d3d;
+                border: 1px solid 
                 border-radius: 3px;
                 padding: 8px;
                 font-size: 16px;
             }
             QTextEdit:focus {
-                border: 1px solid #42b0f5;
+                border: 1px solid 
                 color: white;
             }
             QTextEdit:focus {
-                border: 1px solid #42b0f5;
+                border: 1px solid 
                 color: white;
             }
         """)
     
     def analyze_sequence(self):
-        # Clear previous results
+        
         for i in reversed(range(self.results_layout.count())): 
             self.results_layout.itemAt(i).widget().setParent(None)
         
-        # Get sequence from either file or input
+        
         if self.current_file:
-            # Disable all inputs
+            
             self.sequence_input.setEnabled(False)
             self.browse_button.setEnabled(False)
             self.analyze_button.setEnabled(False)
@@ -465,7 +532,7 @@ class GeneticAnalyzerGUI(QMainWindow):
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
             
-            # Load file in background
+            
             self.file_loader = FileLoader(self.current_file)
             self.file_loader.finished.connect(self.start_analysis)
             self.file_loader.error.connect(self.file_load_error)
@@ -476,24 +543,14 @@ class GeneticAnalyzerGUI(QMainWindow):
                 self.show_error("Please enter a sequence")
                 return
             
-            # Check for spaces
-            if ' ' in sequence:
-                self.show_error("Sequence cannot contain spaces")
-                return
-            
-            # Check minimum length
-            if len(sequence) < 10:
-                self.show_error("Sequence must be at least 10 characters long")
-                return
-                
-            self.start_analysis(sequence.upper())
+            self.start_analysis(sequence)
     
     def show_error(self, message):
         """Show error message in results area"""
         self.results_layout.addWidget(ResultFrame("❌ Error", message, show_copy_button=False))
     
     def start_analysis(self, sequence):
-        # Create and start worker thread
+        
         self.worker = AnalysisWorker(sequence)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished.connect(self.show_results)
@@ -507,30 +564,30 @@ class GeneticAnalyzerGUI(QMainWindow):
         
         self.file_path_label.setText("Error loading file")
         self.file_path_label.setStyleSheet("""
-            color: #ff4444;
+            color: 
             font-size: 14px;
         """)
         self.browse_button.setText("Browse FASTA File")
         self.current_file = None
     
     def update_progress(self, value):
-        # Smooth progress bar animation
+        
         current_value = self.progress_bar.value()
         if value > current_value:
             self.progress_bar.setValue(value)
     
     def show_results(self, results):
-        # Re-enable only the reset button
+        
         self.sequence_input.setEnabled(False)
         self.browse_button.setEnabled(False)
         self.reset_file_button.setEnabled(False)
         self.analyze_button.setEnabled(True)
         
-        # Update button to reset state
+        
         self.analyze_button.setText("Reset Analysis")
         self.analyze_button.setStyleSheet("""
             QPushButton {
-                background-color: #ff4444;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -539,7 +596,7 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #ff3333;
+                background-color: 
             }
         """)
         self.analyze_button.clicked.disconnect()
@@ -551,19 +608,19 @@ class GeneticAnalyzerGUI(QMainWindow):
             self.results_layout.addWidget(ResultFrame("❌ Error", results['error']))
             return
         
-        # Store results for report generation
+        
         self.analysis_results = results
         
-        # Create button container
+        
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
         button_layout.setContentsMargins(0, 0, 0, 15)
         
-        # Add save report button
+        
         self.save_button = QPushButton("💾 Save Analysis Report")
         self.save_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -572,17 +629,17 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: 
             }
         """)
         self.save_button.clicked.connect(self.save_report)
         button_layout.addWidget(self.save_button)
         
-        # Add save RNA transcription button
+        
         self.save_rna_button = QPushButton("🧬 Save RNA Transcription")
         self.save_rna_button.setStyleSheet("""
             QPushButton {
-                background-color: #2196F3;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -591,17 +648,17 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #1976D2;
+                background-color: 
             }
         """)
         self.save_rna_button.clicked.connect(lambda: self.save_sequence(results['transcription'], "RNA_transcription"))
         button_layout.addWidget(self.save_rna_button)
         
-        # Add save complement button
+        
         self.save_complement_button = QPushButton("🔄 Save Complement")
         self.save_complement_button.setStyleSheet("""
             QPushButton {
-                background-color: #9C27B0;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -610,17 +667,17 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #7B1FA2;
+                background-color: 
             }
         """)
         self.save_complement_button.clicked.connect(lambda: self.save_sequence(results['complement'], "complement"))
         button_layout.addWidget(self.save_complement_button)
         
-        # Add save reverse complement button
+        
         self.save_reverse_complement_button = QPushButton("🔄 Save Reverse Complement")
         self.save_reverse_complement_button.setStyleSheet("""
             QPushButton {
-                background-color: #FF9800;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -629,39 +686,39 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #F57C00;
+                background-color: 
             }
         """)
         self.save_reverse_complement_button.clicked.connect(lambda: self.save_sequence(results['reverse_complement'], "reverse_complement"))
         button_layout.addWidget(self.save_reverse_complement_button)
         
-        # Add button container to results layout
+        
         self.results_layout.addWidget(button_container)
         
-        # Create result frames
+        
         self.results_layout.addWidget(ResultFrame("🧬 Sequence Type", results['sequence_type']))
         self.results_layout.addWidget(ResultFrame("📄 Sequence Length", f"{format(results['length'], ',')} bases"))
         self.results_layout.addWidget(ResultFrame("🧪 GC Content", f"{results['gc_content']:.2f}%"))
         self.results_layout.addWidget(ResultFrame("🔬 AT Skew", f"{results['at_skew']:.4f}"))
         self.results_layout.addWidget(ResultFrame("🔬 GC Skew", f"{results['gc_skew']:.4f}"))
 
-        # Nucleotide composition
-        comp_text = "\n".join([f"{nt}: {format(count, ',')} ({pct:.2f}%)" 
+        
+        comp_text = "\n".join([f"{nt}: {format(count, ',')} ({pct:.2f}%) - {IUPAC_CODES[nt]}" 
                               for nt, (count, pct) in zip(results['nucleotide_counts'].keys(), 
                                                          zip(results['nucleotide_counts'].values(), 
                                                              results['nucleotide_percentages'].values()))])
         
         self.results_layout.addWidget(ResultFrame("🔢 Nucleotide Composition", comp_text))
         
-        # Most common codons
+        
         codon_text = "\n".join([f"{codon}: {format(count, ',')} times" 
                               for codon, count in results['codon_counts'].most_common(5)])
         self.results_layout.addWidget(ResultFrame("🔗 Most Common Codons", codon_text))
         
-        # Missing genes (N count)
+        
         if results['n_count'] > 0:
             self.results_layout.addWidget(ResultFrame("🔍 Missing Genes (N Count)", f"{format(results['n_count'], ',')} positions"))
-            # Show filtered sequence previews only if there are N's
+            
             filtered_preview_first = results['filtered_sequence'][:50]
             filtered_first_blocks = [filtered_preview_first[i:i+10] for i in range(0, len(filtered_preview_first), 10)]
             filtered_first_display = " ".join(filtered_first_blocks)
@@ -672,7 +729,7 @@ class GeneticAnalyzerGUI(QMainWindow):
             filtered_last_display = " ".join(filtered_last_blocks)
             self.results_layout.addWidget(ResultFrame("🧬 Last 50 Bases (N's removed)", filtered_last_display))
 
-        # Original sequence display with 10-base deviations
+        
         first_50 = results['sequence'][:50]
         first_blocks = [first_50[i:i+10] for i in range(0, len(first_50), 10)]
         first_display = " ".join(first_blocks)
@@ -687,7 +744,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         """Generate a formatted HTML report from the analysis results."""
         results = self.analysis_results
         
-        # Format the values before inserting them into the template
+        
         gc_skew = f"{results['gc_skew']:.4f}"
         at_skew = f"{results['at_skew']:.4f}"
         gc_content = f"{results['gc_content']:.2f}"
@@ -704,30 +761,30 @@ class GeneticAnalyzerGUI(QMainWindow):
         body {{
             font-family: Arial, sans-serif;
             line-height: 1.6;
-            color: #e0e0e0;
-            background-color: #1e1e2f;
+            color: 
+            background-color: 
             max-width: 900px;
             margin: 0 auto;
             padding: 20px;
         }}
         h1, h2, h3 {{
-            color: #42b0f5;
+            color: 
         }}
         h1 {{
-            border-bottom: 2px solid #42b0f5;
+            border-bottom: 2px solid 
             padding-bottom: 10px;
         }}
         h2 {{
-            border-bottom: 1px solid #3d3d5f;
+            border-bottom: 1px solid 
             padding-bottom: 5px;
             margin-top: 30px;
         }}
         h3 {{
             margin-top: 20px;
-            color: #3a9ee0;
+            color: 
         }}
         .timestamp {{
-            color: #888888;
+            color: 
             font-style: italic;
             margin-bottom: 30px;
         }}
@@ -742,20 +799,20 @@ class GeneticAnalyzerGUI(QMainWindow):
         }}
         li:before {{
             content: "•";
-            color: #42b0f5;
+            color: 
             font-weight: bold;
             position: absolute;
             left: 0;
         }}
         .sequence-preview {{
             font-family: monospace;
-            background-color: #2d2d3f;
-            color: #e0e0e0;
+            background-color: 
+            color: 
             padding: 15px;
             border-radius: 5px;
             overflow-x: auto;
             white-space: pre-wrap;
-            border: 1px solid #3d3d5f;
+            border: 1px solid 
             margin-bottom: 15px;
             font-size: 16px;
             letter-spacing: 1px;
@@ -763,23 +820,23 @@ class GeneticAnalyzerGUI(QMainWindow):
         .footer {{
             margin-top: 40px;
             padding-top: 10px;
-            border-top: 1px solid #3d3d5f;
-            color: #888888;
+            border-top: 1px solid 
+            color: 
             font-style: italic;
         }}
         .key {{
             font-weight: bold;
-            color: #42b0f5;
+            color: 
         }}
         .legend {{
-            background-color: #2d2d3f;
+            background-color: 
             padding: 15px;
             border-radius: 5px;
             margin-top: 15px;
-            border: 1px solid #3d3d5f;
+            border: 1px solid 
         }}
         .legend h4 {{
-            color: #42b0f5;
+            color: 
             margin-top: 0;
             margin-bottom: 10px;
         }}
@@ -790,7 +847,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         }}
         .legend-key {{
             font-weight: bold;
-            color: #42b0f5;
+            color: 
         }}
     </style>
 </head>
@@ -809,13 +866,13 @@ class GeneticAnalyzerGUI(QMainWindow):
     <h2>🔬 Nucleotide Analysis</h2>
     <ul>"""
         
-        # Nucleotide composition
+        
         for nt, (count, pct) in zip(results['nucleotide_counts'].keys(), 
                                    zip(results['nucleotide_counts'].values(), 
                                        results['nucleotide_percentages'].values())):
             report += f'\n        <li><span class="key">{nt}:</span> {format(count, ",")} ({pct:.2f}%)</li>'
         
-        # Add nucleotide legend
+        
         report += """
     </ul>
     <div class="legend">
@@ -844,20 +901,20 @@ class GeneticAnalyzerGUI(QMainWindow):
         <li><span class="key">GC Skew:</span> """ + gc_skew + """</li>
     </ul>"""
         
-        # Codon analysis with formatted numbers
+        
         report += "\n    <h2>🧬 Codon Analysis</h2>\n    <ul>"
         for codon, count in results['codon_counts'].most_common(5):
             report += f'\n        <li><span class="key">{codon}:</span> {format(count, ",")} times</li>'
         report += "\n    </ul>"
         
-        # Sequence previews with 10-base deviations
+        
         report += """
     <h2>🔍 Sequence Preview</h2>
     <div class="preview-section">
         <h3>First 50 Bases (N's removed)</h3>
         <div class="sequence-preview">"""
         
-        # First 50 filtered bases with 10-base deviations
+        
         filtered_preview_first = results['filtered_sequence'][:50]
         filtered_first_blocks = [filtered_preview_first[i:i+10] for i in range(0, len(filtered_preview_first), 10)]
         report += " ".join(filtered_first_blocks)
@@ -866,7 +923,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         <h3>Last 50 Bases (N's removed)</h3>
         <div class="sequence-preview">"""
         
-        # Last 50 filtered bases with 10-base deviations
+        
         filtered_preview_last = results['filtered_sequence'][-50:]
         filtered_last_blocks = [filtered_preview_last[i:i+10] for i in range(0, len(filtered_preview_last), 10)]
         report += " ".join(filtered_last_blocks)
@@ -875,7 +932,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         <h3>Original Sequence (First 50)</h3>
         <div class="sequence-preview">"""
         
-        # First 50 original bases with 10-base deviations
+        
         first_50 = results['sequence'][:50]
         first_blocks = [first_50[i:i+10] for i in range(0, len(first_50), 10)]
         report += " ".join(first_blocks)
@@ -884,7 +941,7 @@ class GeneticAnalyzerGUI(QMainWindow):
         <h3>Original Sequence (Last 50)</h3>
         <div class="sequence-preview">"""
         
-        # Last 50 original bases with 10-base deviations
+        
         last_50 = results['sequence'][-50:]
         last_blocks = [last_50[i:i+10] for i in range(0, len(last_50), 10)]
         report += " ".join(last_blocks)
@@ -906,11 +963,11 @@ class GeneticAnalyzerGUI(QMainWindow):
         if not hasattr(self, 'analysis_results'):
             return
         
-        # Get the script directory to use as default save location
+        
         import os
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Create default filename with current date and time
+        
         default_filename = f"DNA_Analysis_{time.strftime('%Y-%m-%d_%H-%M-%S')}.html"
         default_path = os.path.join(script_dir, default_filename)
             
@@ -927,11 +984,11 @@ class GeneticAnalyzerGUI(QMainWindow):
                 with open(file_name, 'w', encoding='utf-8') as f:
                     f.write(report)
                 
-                # Show success message without copy button
+                
                 success_frame = QFrame()
                 success_frame.setStyleSheet("""
                     QFrame {
-                        background-color: #4CAF50;
+                        background-color: 
                         border-radius: 5px;
                         padding: 15px;
                         margin: 5px;
@@ -948,17 +1005,17 @@ class GeneticAnalyzerGUI(QMainWindow):
                 success_label.setWordWrap(True)
                 
                 success_layout.addWidget(success_label)
-                self.results_layout.insertWidget(1, success_frame)  # Insert after save button
+                self.results_layout.insertWidget(1, success_frame)  
                 
-                # Auto-remove success message after 5 seconds
+                
                 QTimer.singleShot(5000, lambda: success_frame.setParent(None))
                 
             except Exception as e:
-                # Show error message without copy button
+                
                 error_frame = QFrame()
                 error_frame.setStyleSheet("""
                     QFrame {
-                        background-color: #ff4444;
+                        background-color: 
                         border-radius: 5px;
                         padding: 15px;
                         margin: 5px;
@@ -975,38 +1032,38 @@ class GeneticAnalyzerGUI(QMainWindow):
                 error_label.setWordWrap(True)
                 
                 error_layout.addWidget(error_label)
-                self.results_layout.insertWidget(1, error_frame)  # Insert after save button
+                self.results_layout.insertWidget(1, error_frame)  
                 
-                # Auto-remove error message after 5 seconds
+                
                 QTimer.singleShot(5000, lambda: error_frame.setParent(None))
     
     def reset_analysis(self):
-        # Clear results
+        
         for i in reversed(range(self.results_layout.count())): 
             self.results_layout.itemAt(i).widget().setParent(None)
         
-        # Re-enable all inputs
+        
         self.sequence_input.setEnabled(True)
         self.browse_button.setEnabled(True)
         self.reset_file_button.setEnabled(True)
         self.analyze_button.setEnabled(True)
         
-        # Clear input and file selection
+        
         self.sequence_input.clear()
         self.current_file = None
         self.file_path_label.setText("No file selected")
         self.file_path_label.setStyleSheet("""
-            color: #888888;
+            color: 
             font-size: 14px;
         """)
         self.browse_button.setText("Browse FASTA File")
         self.reset_file_button.setVisible(False)
         
-        # Reset button to analyze state
+        
         self.analyze_button.setText("Analyze Sequence")
         self.analyze_button.setStyleSheet("""
             QPushButton {
-                background-color: #42b0f5;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -1015,7 +1072,7 @@ class GeneticAnalyzerGUI(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #3a9ee0;
+                background-color: 
             }
         """)
         self.analyze_button.clicked.disconnect()
@@ -1026,11 +1083,11 @@ class GeneticAnalyzerGUI(QMainWindow):
         if not sequence:
             return
         
-        # Get the script directory to use as default save location
+        
         import os
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Create default filename with current date and time
+        
         default_filename = f"{sequence_type}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.fasta"
         default_path = os.path.join(script_dir, default_filename)
             
@@ -1045,15 +1102,15 @@ class GeneticAnalyzerGUI(QMainWindow):
             try:
                 with open(file_name, 'w', encoding='utf-8') as f:
                     f.write(f">{sequence_type}\n")
-                    # Write sequence in chunks of 80 characters
+                    
                     for i in range(0, len(sequence), 80):
                         f.write(sequence[i:i+80] + "\n")
                 
-                # Show success message
+                
                 success_frame = QFrame()
                 success_frame.setStyleSheet("""
                     QFrame {
-                        background-color: #4CAF50;
+                        background-color: 
                         border-radius: 5px;
                         padding: 15px;
                         margin: 5px;
@@ -1070,17 +1127,17 @@ class GeneticAnalyzerGUI(QMainWindow):
                 success_label.setWordWrap(True)
                 
                 success_layout.addWidget(success_label)
-                self.results_layout.insertWidget(1, success_frame)  # Insert after button container
+                self.results_layout.insertWidget(1, success_frame)  
                 
-                # Auto-remove success message after 5 seconds
+                
                 QTimer.singleShot(5000, lambda: success_frame.setParent(None))
                 
             except Exception as e:
-                # Show error message
+                
                 error_frame = QFrame()
                 error_frame.setStyleSheet("""
                     QFrame {
-                        background-color: #ff4444;
+                        background-color: 
                         border-radius: 5px;
                         padding: 15px;
                         margin: 5px;
@@ -1097,9 +1154,9 @@ class GeneticAnalyzerGUI(QMainWindow):
                 error_label.setWordWrap(True)
                 
                 error_layout.addWidget(error_label)
-                self.results_layout.insertWidget(1, error_frame)  # Insert after button container
+                self.results_layout.insertWidget(1, error_frame)  
                 
-                # Auto-remove error message after 5 seconds
+                
                 QTimer.singleShot(5000, lambda: error_frame.setParent(None))
 
 if __name__ == "__main__":
