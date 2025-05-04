@@ -129,9 +129,6 @@ python main.py
 - HTML report generation with CSS styling 🎨
 - FASTA file format support 📂
 
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 📜
 
 ## 🤝 Contributing
 
